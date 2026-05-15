@@ -1,0 +1,118 @@
+##############################################################################
+# Kafka Infrastructure for Kalshi Trading Data Pipeline
+#
+# Provides: RedPanda broker + Console + Kafka Connect with Snowflake connector
+#
+# Usage:
+#   docker compose up -d                    # Start all services
+#   docker compose logs -f connect          # Watch connector logs
+#   docker compose down                     # Stop all services
+#
+# Broker is accessible at:
+#   - localhost:9092          (from host machine)
+#   - 192.168.1.172:19092    (from LAN / RedPanda on remote host)
+#   - redpanda:29092         (from Docker internal network)
+##############################################################################
+
+networks:
+  kalshi-kafka:
+    driver: bridge
+
+volumes:
+  redpanda_data: {}
+  connect_plugins: {}
+
+services:
+  # --------------------------------------------------------------------------
+  # RedPanda — Kafka-compatible broker (single node)
+  # --------------------------------------------------------------------------
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    container_name: kalshi-redpanda
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr internal://0.0.0.0:29092,external://0.0.0.0:9092,lan://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:29092,external://localhost:9092,lan://192.168.1.172:19092
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --advertise-schema-registry-addr internal://redpanda:8081,external://localhost:18081
+      - --set redpanda.auto_create_topics_enabled=true
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+      - "18081:18081"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - kalshi-kafka
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # RedPanda Console — Web UI for topic inspection
+  # --------------------------------------------------------------------------
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.8.0
+    container_name: kalshi-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+      SCHEMA_REGISTRY_URL: http://redpanda:8081
+    networks:
+      - kalshi-kafka
+
+  # --------------------------------------------------------------------------
+  # Kafka Connect — with Snowflake Sink Connector
+  # --------------------------------------------------------------------------
+  connect:
+    image: confluentinc/cp-kafka-connect:7.7.1
+    container_name: kalshi-connect
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: redpanda:29092
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: kalshi-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: _kalshi-connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _kalshi-connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _kalshi-connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: com.snowflake.kafka.connector.records.SnowflakeJsonConverter
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+    volumes:
+      - connect_plugins:/usr/share/confluent-hub-components
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing Snowflake Kafka Connector..."
+        confluent-hub install --no-prompt snowflakeinc/snowflake-kafka-connector:2.4.0
+        echo "Starting Kafka Connect..."
+        /etc/confluent/docker/run
+    networks:
+      - kalshi-kafka
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s

@@ -1,0 +1,45 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Pipeline state
+.pipeline_paused
+
+# Backups
+backups/
+
+# Snowflake keys and credentials (NEVER commit)
+*.p8
+*.pem
+*.key
+keys/
+snowflake_profile*.json
+kafka/snowflake_kafkaguy_rsa_key*
+
+# Cortex internal
+.cortex/

@@ -1,0 +1,14 @@
+# Kalshi Trading Data Pipeline — Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Core (all paths)
+aiohttp>=3.9
+
+# PostgreSQL ingest path
+psycopg2-binary>=2.9
+
+# Kafka streaming path
+confluent-kafka>=2.3
+
+# Direct Snowpipe Streaming path
+snowpipe-streaming>=1.0
